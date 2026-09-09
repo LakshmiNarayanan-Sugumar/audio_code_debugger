@@ -1,0 +1,4 @@
+My FastAPI app for the stock predictor just hangs whenever I hit the predict endpoint. 
+It doesn't crash, doesn't return an error, it just sits there and eventually times out. 
+It was working when I tested the model separately in the notebook, 
+so I think something's wrong with how I'm serving it, but I'm not sure what.

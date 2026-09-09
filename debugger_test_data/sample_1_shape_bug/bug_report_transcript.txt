@@ -1,0 +1,4 @@
+Hey, I'm working on my Tata Motors BiLSTM model.
+It builds fine, model.summary() looks totally normal, and training even runs without any errors. 
+But when I try to run predictions on my test set afterward, I get a shape mismatch error from the input layer. 
+I don't get why the model trained just fine, so I'm confused where the mismatch is even coming from.

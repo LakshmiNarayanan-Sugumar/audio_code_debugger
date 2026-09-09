@@ -1,0 +1,10 @@
+{
+  "sample_id": "sample_3_scaler_leakage",
+  "bug_type": "correctness / data leakage",
+  "source_project": "tata_motors_stock_predictor_v2 (seeded bug, not real production code)",
+  "buggy_line": "X_scaled = scaler_X.fit_transform(X_raw)",
+  "fixed_line": "X_train_scaled = scaler_X.fit_transform(X_train_raw)",
+  "symptom_described_in_audio": "model trains and predicts fine, metrics look unusually good",
+  "expected_diagnosis_keywords": ["scaler", "fit before split", "data leakage", "train/test"],
+  "transcript_source" : "ground_truth"
+}

@@ -1,0 +1,10 @@
+{
+  "sample_id": "sample_2_serving_hang",
+  "bug_type": "runtime / blocking / performance",
+  "source_project": "tata_motors_stock_predictor_v2",
+  "buggy_line": "df = yf.download(TICKER, period='6mo', progress=False)  # inside endpoint; model.predict(X_input)",
+  "fixed_line": "df_cache = yf.download(...)  # once at module load; model(X_input, training=False).numpy()",
+  "symptom_described_in_audio": "endpoint hangs and times out, no crash, works fine in notebook",
+  "expected_diagnosis_keywords": ["yfinance", "blocking call", "FastAPI", "predict", "endpoint"],
+  "transcript_source" : "ground_truth"
+}

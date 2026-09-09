@@ -1,0 +1,6 @@
+I trained my BiLSTM model on the Tata Motors data and everything looks great 
+— training runs smoothly, no errors, and my test metrics actually look really 
+good, maybe too good. I'm a little suspicious because the error numbers are 
+lower than I expected for stock price prediction. I don't see any obvious bug in 
+the code, but I have a feeling something might be off with how I'm scaling or 
+splitting the data.

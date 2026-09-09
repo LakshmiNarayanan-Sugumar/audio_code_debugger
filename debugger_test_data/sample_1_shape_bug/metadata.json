@@ -1,0 +1,10 @@
+{
+  "sample_id": "sample_1_shape_bug",
+  "bug_type": "shape / API misuse (latent, delayed failure)",
+  "source_project": "tata_motors_stock_predictor_v2",
+  "buggy_line": "input_shape=(X_train.shape[1], X_test.shape[2])",
+  "fixed_line": "input_shape=(X_train.shape[1], X_train.shape[2])",
+  "symptom_described_in_audio": "model builds and trains fine, error only appears later at predict time",
+  "expected_diagnosis_keywords": ["input_shape", "X_test", "X_train", "shape mismatch"],
+  "transcript_source" : "ground_truth"
+}
