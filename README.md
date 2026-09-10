@@ -42,9 +42,9 @@ Each sample includes an audio bug report, ground-truth transcript, buggy code, a
 
 | Sample | Retrieval | Diagnosis | Fix |
 |---|---|---|---|
-| Shape bug | ✅ Correct file | ✅ Correct | ✅ Correct |
-| Serving hang | ✅ Correct file | ✅ Correct direction | ⚠️ Partial — addressed blocking I/O, missed TF threading fix |
-| Scaler leakage | ✅ Correct file | ✅ Correct | ✅ Correct |
+| Shape bug | Correct file | Correct | Correct |
+| Serving hang | Correct file | Correct direction | Partial — addressed blocking I/O, missed TF threading fix |
+| Scaler leakage | Correct file | Correct | Correct |
 
 **Known limitation:** correct retrieval doesn't guarantee correct generation. In the serving-hang case, the model retrieved the right file but the generated fix only addressed part of the actual root cause — a genuine RAG failure mode worth understanding, not just a bug to patch away.
 
@@ -106,3 +106,15 @@ Opens a Gradio interface at `http://127.0.0.1:7860`. Upload an audio bug report 
 ├── debugger_test_data/        # 3 validated test samples
 └── tests/                     # Validation scripts for each pipeline stage
 ```
+
+---
+
+## Example Output
+
+**Interface:**
+
+![Gradio interface for the audio debugger](screenshots/gradio_interface.png)
+
+**Sample result** — audio bug report → transcript → retrieved context → diagnosis + fix:
+
+![Diagnosis and fix generated from an audio bug report](screenshots/sample_output.png)
