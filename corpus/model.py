@@ -17,10 +17,9 @@ scaler_y = joblib.load("data/scaler_y.pkl")
 
 
 # build BiLSTM model
-# FIX: both dimensions of input_shape use X_train, not X_test
 model = Sequential([
     Bidirectional(LSTM(64, return_sequences=True),
-        input_shape=(X_train.shape[1], X_train.shape[2])),  # was X_test.shape[2]
+        input_shape=(X_train.shape[1], X_train.shape[2])),
     Dropout(0.2),
     Bidirectional(LSTM(32, return_sequences=False)),
     Dropout(0.2),

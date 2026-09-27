@@ -11,6 +11,7 @@ def get_llm():
         provider="auto",
         task="conversational",
         max_new_tokens=1024,
+        temperature=0.1,
     )
     return ChatHuggingFace(llm=llm)
 

@@ -1,0 +1,266 @@
+
+==================== sample_1_shape_bug ====================
+Transcript: Hey, I'm working on my Tata Motors BiLSTM model. It builds fine, model.summery looks totally normal and training even runs without any errors. But when I try to run predictions on my test set afterward, I get a shape mismatch error from the input layer. I don't get why. The model range is fine, so I'm confused where the mismatch is even coming from.
+Retrieved from:
+  - predict_api.py :: predict
+  - predict_api.py :: module_level_1
+  - data_preprocessing.py :: module_level_5
+  - data_preprocessing.py :: module_level_4
+
+Output:
+
+**DIAGNOSIS:**
+The root cause of the shape mismatch error is in the `input_shape` parameter of the first `Bidirectional(LSTM)` layer. Specifically, the `input_shape` is incorrectly specified as `(X_train.shape[1], X_test.shape[2])`. This is problematic because `X_test.shape[2]` should be `1`, but it seems to be incorrect due to the way the data was reshaped during preprocessing.
+
+In the `data_preprocessing.py` file, the `X_test` array is reshaped as follows:
+```python
+X_test = X_test_scaled.reshape(X_test_scaled.shape[0], X_test_scaled.shape[1], 1)
+```
+This ensures that `X_test` has the correct shape of `(samples, timesteps, features)`, which is `(X_test_scaled.shape[0], X_test_scaled.shape[1], 1)`.
+
+However, in the `predict_api.py` file, the `input_shape` is incorrectly set to `(X_train.shape[1], X_test.shape[2])`. Since `X_test.shape[2]` is `1`, this should be `(X_train.shape[1], 1)`.
+
+**FIX:**
+Here is the complete corrected version of the `BUGGY CODE` with the root cause fixed:
+
+```python
+import numpy as np
+import math
+import joblib
+import matplotlib.pyplot as plt
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Bidirectional, Dropout, Dense
+from tensorflow.keras.callbacks import EarlyStopping
+import os
+
+# loading saved data
+X_train = np.load("data/X_train.npy")
+X_test  = np.load("data/X_test.npy")
+y_train = np.load("data/y_train.npy")
+y_test  = np.load("data/y_test.npy")
+scaler_y = joblib.load("data/scaler_y.pkl")
+
+# build BiLSTM model
+model = Sequential([
+    Bidirectional(LSTM(64, return_sequences=True),
+        input_shape=(X_train.shape[1], 1)),  # Corrected input_shape here
+    Dropout(0.2),
+    Bidirectional(LSTM(32, return_sequences=False)),
+    Dropout(0.2),
+    Dense(1)
+])
+
+model.compile(optimizer="adam", loss="mean_squared_error")
+model.summary()
+
+early_stop = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
+
+history = model.fit(
+    X_train, y_train,
+    epochs=100,
+    batch_size=64,
+    validation_split=0.1,
+    callbacks=[early_stop],
+    verbose=1
+)
+
+predictions   = scaler_y.inverse_transform(model.predict(X_test))
+y_test_actual = scaler_y.inverse_transform(y_test.reshape(-1, 1))
+
+mae  = mean_absolute_error(y_test_actual, predictions)
+rmse = math.sqrt(mean_squared_error(y_test_actual, predictions))
+
+print(f"\nMAE:  ₹{mae:.2f}")
+print(f"RMSE: ₹{rmse:.2f}")
+
+plt.figure(figsize=(14, 5))
+plt.plot(y_test_actual, color="steelblue", label="Actual Price")
+plt.plot(predictions,   color="red",       label="Predicted Price")
+plt.title("TMPV.NS — Predicted vs Actual Closing Price")
+plt.xlabel("Days")
+plt.ylabel("Price (₹)")
+plt.legend()
+plt.tight_layout()
+plt.savefig("predicted_vs_actual.png")
+plt.show()
+
+os.makedirs("model", exist_ok=True)
+model.save("tata_motors_bilstm.keras")
+print("model saved")
+```
+
+By correcting the `input_shape` parameter to `(X_train.shape[1], 1)`, the model will now accept the input data with the correct shape, resolving the shape mismatch error.
+
+==================== sample_2_serving_hang ====================
+Transcript: My FastAPI app for the stock predictor just hangs whenever I hit the predictor endpoint. It doesn't crash, doesn't return an error, it just sits there and eventually times out. It was working when I tested the model separately in the notebook. So I think something's wrong with how I'm serving it. But I'm not sure what.
+Retrieved from:
+  - predict_api.py :: module_level_1
+
+Output:
+
+**DIAGNOSIS:**
+The issue causing the FastAPI app to hang is likely due to the synchronous nature of the `yf.download` function within the `/predict` endpoint. When the app receives a request to the `/predict` endpoint, it fetches the latest stock data synchronously, which blocks the execution until the data is downloaded. This blocking behavior can lead to the app hanging indefinitely if the download takes too long or fails silently.
+
+**FIX:**
+To resolve this issue, we need to make the data fetching asynchronous. One way to achieve this is by using the `asyncio` library to handle the asynchronous downloading of stock data. Here’s the corrected version of the `predict` function:
+
+```python
+import asyncio
+import numpy as np
+import yfinance as yf
+import joblib
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from tensorflow.keras.models import load_model
+
+LOOKBACK = 60
+TICKER   = "TMPV.NS"
+
+model  = load_model("tata_motors_bilstm.keras")
+scaler = joblib.load("data/scaler_y.pkl")
+
+app = FastAPI()
+
+class PredictResponse(BaseModel):
+    ticker: str
+    current_price: float
+    predicted_price: float
+    currency: str
+
+@app.get("/")
+def home():
+    return {"message": "Tata Motors Stock Predictor API is running"}
+
+async def fetch_data(ticker):
+    try:
+        df = await asyncio.to_thread(yf.download, ticker, period="6mo", progress=False)
+        return df
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching data: {str(e)}")
+
+@app.post("/predict", response_model=PredictResponse)
+async def predict():
+    df = await fetch_data(TICKER)
+
+    if df.empty:
+        raise HTTPException(status_code=500, detail="No data available")
+
+    close_prices  = df["Close"].values.flatten()[-LOOKBACK:]
+    current_price = float(df["Close"].values.flatten()[-1])
+
+    scaled  = scaler.transform(close_prices.reshape(-1, 1))
+    X_input = scaled.reshape(1, LOOKBACK, 1)
+
+    prediction_scaled = model.predict(X_input)
+    predicted_price   = float(scaler.inverse_transform(prediction_scaled)[0][0])
+
+    return PredictResponse(
+        ticker=TICKER,
+        current_price=round(current_price, 2),
+        predicted_price=round(predicted_price, 2),
+        currency="INR"
+    )
+```
+
+In this fix, we introduced an asynchronous function `fetch_data` that wraps the `yf.download` call using `asyncio.to_thread`. This allows the data fetching to happen in a separate thread without blocking the main FastAPI event loop. The `/predict` endpoint now calls this asynchronous function using `await`, ensuring that the app remains responsive even while waiting for the data to be fetched.
+
+==================== sample_3_scaler_leakage ====================
+Transcript: I trained my BiLSTM model on the Tata Motors data and everything looks great. Training runs smoothly, no errors and my test metrics actually look really good. Maybe too good. I am a little suspicious because the error numbers are lower than I expected for stock price prediction. I don't see any obvious bug in the code but I have a feeling something might be off with how I am scaling or splitting the data.
+Retrieved from:
+  - predict_api.py :: module_level_1
+  - model.py :: module_level_3
+  - predict_api.py :: predict
+  - model.py :: module_level_2
+
+Output:
+
+**DIAGNOSIS:**
+The root cause of the issue lies in the fact that the `MinMaxScaler` is fitted on the entire dataset (`X_scaled` and `y_scaled`) before splitting it into training and testing sets. This means that both the training and testing data will be scaled based on the maximum and minimum values of the entire dataset, which can lead to poor generalization of the model during evaluation. Additionally, the `y_test` array is flattened after scaling, which can result in incorrect dimensions when used for model evaluation.
+
+**FIX:**
+```python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+import yfinance as yf
+import joblib
+import os
+
+# fetching TMPV.NS data
+print("fetching TMPV.NS data...")
+df = yf.download("TMPV.NS", start="2019-01-01", end="2026-06-25")
+
+print("actual date range:", df.index.min(), "to", df.index.max())
+print("total trading days:", len(df))
+print("shape:", df.shape)
+
+print("\nmissing values:")
+print(df.isnull().sum())
+
+plt.figure(figsize=(14, 5))
+plt.plot(df["Close"], color="steelblue", linewidth=1.3)
+plt.title("TMPV.NS - Closing Price")
+plt.xlabel("Date")
+plt.ylabel("Price (₹)")
+plt.tight_layout()
+plt.savefig("closing_price_plot.png")
+plt.show()
+
+close_prices = df[["Close"]].values
+print("close prices shape:", close_prices.shape)
+
+lookback = 60
+
+X_raw, y_raw = [], []
+for i in range(lookback, len(close_prices)):
+    X_raw.append(close_prices[i-lookback:i, 0])
+    y_raw.append(close_prices[i, 0])
+
+X_raw = np.array(X_raw)
+y_raw = np.array(y_raw)
+
+print("X_raw shape:", X_raw.shape)
+print("y_raw shape:", y_raw.shape)
+
+split = int(len(X_raw) * 0.80)
+
+X_train_raw = X_raw[:split]
+X_test_raw  = X_raw[split:]
+y_train_raw = y_raw[:split]
+y_test_raw  = y_raw[split:]
+
+# fit scalers separately on training and testing data
+scaler_X = MinMaxScaler(feature_range=(0, 1))
+scaler_y = MinMaxScaler(feature_range=(0, 1))
+
+X_train_scaled = scaler_X.fit_transform(X_train_raw)
+y_train_scaled = scaler_y.fit_transform(y_train_raw.reshape(-1, 1)).flatten()
+
+X_test_scaled = scaler_X.transform(X_test_raw)
+y_test_scaled = scaler_y.transform(y_test_raw.reshape(-1, 1)).flatten()
+
+print("train samples:", len(X_train_scaled))
+print("test samples:", len(X_test_scaled))
+
+X_train = X_train_scaled.reshape(X_train_scaled.shape[0], X_train_scaled.shape[1], 1)
+X_test  = X_test_scaled.reshape(X_test_scaled.shape[0], X_test_scaled.shape[1], 1)
+
+print("X_train shape:", X_train.shape)
+print("X_test shape:", X_test.shape)
+
+os.makedirs("data", exist_ok=True)
+
+np.save("data/X_train.npy", X_train)
+np.save("data/X_test.npy", X_test)
+np.save("data/y_train.npy", y_train)
+np.save("data/y_test.npy", y_test)
+np.save("data/close_prices.npy", close_prices)
+
+joblib.dump(scaler_X, "data/scaler_X.pkl")
+joblib.dump(scaler_y, "data/scaler_y.pkl")
+print("all arrays and scalers saved to data/")
+```
+
+This fix ensures that the `MinMaxScaler` is fitted separately on the training and testing datasets, preventing the leakage of information from the test set into the training process. It also maintains the correct dimensions for `y_test_scaled` when transforming it back to its original scale.

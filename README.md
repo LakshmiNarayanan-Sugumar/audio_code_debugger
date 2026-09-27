@@ -31,10 +31,12 @@ The retrieval corpus is built from a real project — a Tata Motors stock price 
 | Sample | Bug Type | Root Cause |
 |---|---|---|
 | `sample_1_shape_bug` | Shape mismatch at inference | `input_shape` mixed `X_train`/`X_test` dimensions |
-| `sample_2_serving_hang` | FastAPI endpoint hangs | Blocking I/O + TensorFlow threading under async |
+| `sample_2_serving_hang` | FastAPI endpoint hangs | Blocking I/O (`yf.download()` called synchronously inside the request handler) |
 | `sample_3_scaler_leakage` | Inflated test metrics | Scaler fit before train/test split |
 
 Each sample includes an audio bug report, ground-truth transcript, buggy code, and the actual fix — used to validate every pipeline stage against real outcomes, not just "does it run."
+
+**Retrieval design note:** each sample's own source file is excluded from retrieval to prevent the pipeline from just retrieving its own answer verbatim. For `predict_api.py` — the only corpus file with real function-level structure — this exclusion is applied at the chunk level (excluding only the `predict` function, the literal answer) rather than the whole file, so legitimate supporting context (module-level setup: caching pattern, TensorFlow threading config) stays available. `model.py` and `data_preprocessing.py` are monolithic scripts with no function boundaries, so whole-file exclusion is the smallest meaningful unit there.
 
 ---
 
@@ -43,10 +45,14 @@ Each sample includes an audio bug report, ground-truth transcript, buggy code, a
 | Sample | Retrieval | Diagnosis | Fix |
 |---|---|---|---|
 | Shape bug | Correct file | Correct | Correct |
-| Serving hang | Correct file | Correct direction | Partial — addressed blocking I/O, missed TF threading fix |
+| Serving hang | Correct chunk | Correct | Correct |
 | Scaler leakage | Correct file | Correct | Correct |
 
-**Known limitation:** correct retrieval doesn't guarantee correct generation. In the serving-hang case, the model retrieved the right file but the generated fix only addressed part of the actual root cause — a genuine RAG failure mode worth understanding, not just a bug to patch away.
+Full verified run: [`results_log.txt`](results_log.txt).
+
+**Known limitation — generation variance:** even with `temperature=0.1`, the serving-hang sample's *diagnosis* converges reliably across runs (always correctly identifies the blocking `yf.download()` call), but the generated *fix* varies — different runs produced `asyncio.to_thread`, a `ThreadPoolExecutor`, and a broken `BackgroundTasks` pattern that read cached data before it was ever written. This is a genuine, documented finding, not glossed over: diagnosis is a short, constrained output and stabilizes easily; code generation has many valid-looking implementation paths and doesn't fully stabilize at low temperature alone. In practice this means LLM-generated fixes need a verification step (tests, execution, or human review) before being trusted — a general limitation of LLM code generation, not specific to this pipeline.
+
+An earlier version of this pipeline (before the retrieval fix above) also surfaced a distinct **context-contamination** failure mode: when irrelevant chunks were retrieved alongside the relevant one, the model would blend variable names and structure from the irrelevant context into the fix (e.g. renaming a correct variable to match unrelated code, or dropping a decorator that existed correctly in the original file). This was mitigated with explicit prompt constraints (`src/prompt.py`, rules 10-11) requiring the buggy code's existing names/structure to take precedence over anything seen only in retrieved context, and by narrowing retrieval to the single most relevant chunk for this sample.
 
 ---
 
@@ -62,11 +68,13 @@ Create a `.env` file in the project root with your Hugging Face token (needs **I
 
     HF_TOKEN=your_token_here
 
-Build the retrieval index (if not already committed to the repo):
+Build the retrieval index:
 
 ```bash
-python -m tests.test_embedding
+python rebuild_index.py
 ```
+
+Run this again any time a file under `corpus/` changes — the index is a snapshot, not rebuilt automatically.
 
 ---
 
@@ -94,6 +102,9 @@ Opens a Gradio interface at `http://127.0.0.1:7860`. Upload an audio bug report 
 
 ```
 ├── app.py                    # Gradio interface
+├── run_all_samples.py        # Runs the pipeline end-to-end on all 3 test samples
+├── rebuild_index.py          # Re-chunks + re-embeds corpus/, rebuilds the FAISS index
+├── results_log.txt           # Saved output of the verified run_all_samples.py run
 ├── src/
 │   ├── transcribe.py         # Whisper transcription
 │   ├── chunk.py               # AST-based code chunking
