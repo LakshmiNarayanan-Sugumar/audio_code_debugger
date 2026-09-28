@@ -44,9 +44,11 @@ Each sample includes an audio bug report, ground-truth transcript, buggy code, a
 
 | Sample | Retrieval | Diagnosis | Fix |
 |---|---|---|---|
-| Shape bug | Correct file | Correct | Correct |
-| Serving hang | Correct chunk | Correct | Correct |
-| Scaler leakage | Correct file | Correct | Correct |
+| Shape bug | N/A (relevant file excluded by design) | Correct | Correct |
+| Serving hang | Correct chunk (`predict_api.py :: module_level_1`) | Correct | Correct (varies across runs) |
+| Scaler leakage | N/A (relevant file excluded by design) | Correct | Correct |
+
+Samples 1 and 3 have their source file excluded from retrieval to prevent answer leakage, and the remaining corpus has no related code, so retrieval adds no useful context there and the model diagnoses them from general knowledge. Sample 2 is the case where retrieval contributes: its supporting context lives in a file that can be excluded at the chunk level.
 
 Full verified run: [`results_log.txt`](results_log.txt).
 
