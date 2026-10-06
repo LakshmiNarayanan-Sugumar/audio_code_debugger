@@ -31,7 +31,7 @@ The retrieval corpus is built from a real project — a Tata Motors stock price 
 | Sample | Bug Type | Root Cause |
 |---|---|---|
 | `sample_1_shape_bug` | Shape mismatch at inference | `input_shape` mixed `X_train`/`X_test` dimensions |
-| `sample_2_serving_hang` | FastAPI endpoint hangs | Blocking I/O (`yf.download()` called synchronously inside the request handler) |
+| `sample_2_serving_hang` | FastAPI endpoint hangs | Blocking `yf.download()` in the request handler, plus TensorFlow threading and `model.predict` inside the server |
 | `sample_3_scaler_leakage` | Inflated test metrics | Scaler fit before train/test split |
 
 Each sample includes an audio bug report, ground-truth transcript, buggy code, and the actual fix — used to validate every pipeline stage against real outcomes, not just "does it run."
@@ -44,15 +44,15 @@ Each sample includes an audio bug report, ground-truth transcript, buggy code, a
 
 | Sample | Retrieval | Diagnosis | Fix |
 |---|---|---|---|
-| Shape bug | N/A (relevant file excluded by design) | Correct | Correct |
-| Serving hang | Correct chunk (`predict_api.py :: module_level_1`) | Correct | Correct (varies across runs) |
+| Shape bug | N/A (relevant file excluded by design) | Mostly correct (finds the faulty `input_shape` line, misattributes which file it is in) | Correct |
+| Serving hang | Correct chunk (`predict_api.py :: module_level_1`) | Partial (finds the blocking `yf.download()` call, misses the TensorFlow threading / `model.predict` cause) | Incorrect |
 | Scaler leakage | N/A (relevant file excluded by design) | Correct | Correct |
 
 Samples 1 and 3 have their source file excluded from retrieval to prevent answer leakage, and the remaining corpus has no related code, so retrieval adds no useful context there and the model diagnoses them from general knowledge. Sample 2 is the case where retrieval contributes: its supporting context lives in a file that can be excluded at the chunk level.
 
 Full verified run: [`results_log.txt`](results_log.txt).
 
-**Known limitation — generation variance:** even with `temperature=0.1`, the serving-hang sample's *diagnosis* converges reliably across runs (always correctly identifies the blocking `yf.download()` call), but the generated *fix* varies — different runs produced `asyncio.to_thread`, a `ThreadPoolExecutor`, and a broken `BackgroundTasks` pattern that read cached data before it was ever written. This is a genuine, documented finding, not glossed over: diagnosis is a short, constrained output and stabilizes easily; code generation has many valid-looking implementation paths and doesn't fully stabilize at low temperature alone. In practice this means LLM-generated fixes need a verification step (tests, execution, or human review) before being trusted — a general limitation of LLM code generation, not specific to this pipeline.
+**Known limitation — incomplete diagnosis and generation variance:** even with `temperature=0.1`, the serving-hang sample's *diagnosis* is stable across runs but incomplete: it always identifies the blocking `yf.download()` call in the handler, but never the TensorFlow threading / `model.predict` cause, which the actual fix addresses (single-threaded TensorFlow config and a direct `model(X, training=False)` call). The generated *fix* also varies — different runs produced `asyncio.to_thread`, a `ThreadPoolExecutor`, and a broken `BackgroundTasks` pattern that read cached data before it was ever written — but none of these touches the TensorFlow cause, so none would be expected to resolve the hang. This is a documented finding, not glossed over: a stable diagnosis is not necessarily a complete one, and code generation has many plausible-looking implementation paths that don't stabilize at low temperature alone. In practice this means LLM-generated fixes need a verification step (tests, execution, or human review) before being trusted — a general limitation of LLM code generation, not specific to this pipeline.
 
 An earlier version of this pipeline (before the retrieval fix above) also surfaced a distinct **context-contamination** failure mode: when irrelevant chunks were retrieved alongside the relevant one, the model would blend variable names and structure from the irrelevant context into the fix (e.g. renaming a correct variable to match unrelated code, or dropping a decorator that existed correctly in the original file). This was mitigated with explicit prompt constraints (`src/prompt.py`, rules 10-11) requiring the buggy code's existing names/structure to take precedence over anything seen only in retrieved context, and by narrowing retrieval to the single most relevant chunk for this sample.
 
