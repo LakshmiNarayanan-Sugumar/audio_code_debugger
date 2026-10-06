@@ -26,15 +26,15 @@ A RAG-based debugging assistant that takes a *spoken* bug report, retrieves rele
 
 ## Test Corpus
 
-The retrieval corpus is built from a real project — a Tata Motors stock price predictor (BiLSTM model, FastAPI serving layer, data preprocessing pipeline). Three real bugs from that project's development history serve as test cases.
+The retrieval corpus is built from a real project — a Tata Motors stock price predictor (BiLSTM model, FastAPI serving layer, data preprocessing pipeline). Three bugs from that project's development history serve as test cases.
 
 | Sample | Bug Type | Root Cause |
 |---|---|---|
-| `sample_1_shape_bug` | Shape mismatch at inference | `input_shape` mixed `X_train`/`X_test` dimensions |
+| `sample_1_shape_bug` | Input-shape reference error | `input_shape` mixed `X_train`/`X_test` dimensions |
 | `sample_2_serving_hang` | FastAPI endpoint hangs | Blocking `yf.download()` in the request handler, plus TensorFlow threading and `model.predict` inside the server |
 | `sample_3_scaler_leakage` | Inflated test metrics | Scaler fit before train/test split |
 
-Each sample includes an audio bug report, ground-truth transcript, buggy code, and the actual fix — used to validate every pipeline stage against real outcomes, not just "does it run."
+Each sample includes an audio bug report, ground-truth transcript, buggy code, and the actual fix, used to check every pipeline stage against real outcomes, not just "does it run."
 
 **Retrieval design note:** each sample's own source file is excluded from retrieval to prevent the pipeline from just retrieving its own answer verbatim. For `predict_api.py` — the only corpus file with real function-level structure — this exclusion is applied at the chunk level (excluding only the `predict` function, the literal answer) rather than the whole file, so legitimate supporting context (module-level setup: caching pattern, TensorFlow threading config) stays available. `model.py` and `data_preprocessing.py` are monolithic scripts with no function boundaries, so whole-file exclusion is the smallest meaningful unit there.
 
@@ -48,9 +48,11 @@ Each sample includes an audio bug report, ground-truth transcript, buggy code, a
 | Serving hang | Correct chunk (`predict_api.py :: module_level_1`) | Partial (finds the blocking `yf.download()` call, misses the TensorFlow threading / `model.predict` cause) | Incorrect |
 | Scaler leakage | N/A (relevant file excluded by design) | Correct | Correct |
 
+**How fixes were graded:** by manual review of the generated code against each sample's ground-truth fix. The generated code was not executed. (For sample 3, the generated script omits the `y_train`/`y_test` definitions, so those would need restoring before it runs.)
+
 Samples 1 and 3 have their source file excluded from retrieval to prevent answer leakage, and the remaining corpus has no related code, so retrieval adds no useful context there and the model diagnoses them from general knowledge. Sample 2 is the case where retrieval contributes: its supporting context lives in a file that can be excluded at the chunk level.
 
-Full verified run: [`results_log.txt`](results_log.txt).
+Full saved output: [`results_log.txt`](results_log.txt).
 
 **Known limitation — incomplete diagnosis and generation variance:** even with `temperature=0.1`, the serving-hang sample's *diagnosis* is stable across runs but incomplete: it always identifies the blocking `yf.download()` call in the handler, but never the TensorFlow threading / `model.predict` cause, which the actual fix addresses (single-threaded TensorFlow config and a direct `model(X, training=False)` call). The generated *fix* also varies — different runs produced `asyncio.to_thread`, a `ThreadPoolExecutor`, and a broken `BackgroundTasks` pattern that read cached data before it was ever written — but none of these touches the TensorFlow cause, so none would be expected to resolve the hang. This is a documented finding, not glossed over: a stable diagnosis is not necessarily a complete one, and code generation has many plausible-looking implementation paths that don't stabilize at low temperature alone. In practice this means LLM-generated fixes need a verification step (tests, execution, or human review) before being trusted — a general limitation of LLM code generation, not specific to this pipeline.
 
@@ -106,18 +108,18 @@ Opens a Gradio interface at `http://127.0.0.1:7860`. Upload an audio bug report 
 ├── app.py                    # Gradio interface
 ├── run_all_samples.py        # Runs the pipeline end-to-end on all 3 test samples
 ├── rebuild_index.py          # Re-chunks + re-embeds corpus/, rebuilds the FAISS index
-├── results_log.txt           # Saved output of the verified run_all_samples.py run
+├── results_log.txt           # Saved output of the run_all_samples.py run
 ├── src/
 │   ├── transcribe.py         # Whisper transcription
-│   ├── chunk.py               # AST-based code chunking
-│   ├── embed.py                # Embedding + FAISS index building
-│   ├── retrieve.py              # Retrieval logic
-│   ├── prompt.py                 # Prompt template
-│   ├── generate.py                 # LLM generation
-│   └── pipeline.py                   # End-to-end orchestration
-├── corpus/                    # Indexed codebase (Tata Motors project)
-├── debugger_test_data/        # 3 validated test samples
-└── tests/                     # Validation scripts for each pipeline stage
+│   ├── chunk.py              # AST-based code chunking
+│   ├── embed.py              # Embedding + FAISS index building
+│   ├── retrieve.py           # Retrieval logic
+│   ├── prompt.py             # Prompt template
+│   ├── generate.py           # LLM generation
+│   └── pipeline.py           # End-to-end orchestration
+├── corpus/                   # Indexed codebase (Tata Motors project)
+├── debugger_test_data/       # 3 test samples with ground-truth fixes
+└── tests/                    # Validation scripts for each pipeline stage
 ```
 
 ---
